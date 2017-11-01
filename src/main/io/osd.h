@@ -74,11 +74,16 @@ typedef enum {
     OSD_BATTERY_REMAINING_CAPACITY,
     OSD_BATTERY_REMAINING_PERCENT,
     OSD_EFFICIENCY_WH_PER_KM,
+<<<<<<< HEAD
     OSD_TRIP_DIST,
     OSD_ATTITUDE_PITCH,
     OSD_ATTITUDE_ROLL,
     OSD_MAP_NORTH,
     OSD_MAP_TAKEOFF,
+=======
+    OSD_HORIZONTAL_WIND,
+    OSD_VERTICAL_WIND,
+>>>>>>> Initial, very basic implementation of OSD wind indicators
     OSD_ITEM_COUNT // MUST BE LAST
 } osd_items_e;
 
