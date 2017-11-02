@@ -1703,7 +1703,7 @@ static bool osdDrawSingleElement(uint8_t item)
         }
 
 #if 0
-    case OSD_HORIZONTAL_WIND:
+    case OSD_WIND_SPEED_HORIZONTAL:
         {
             float horizontalWindSpeed;
             float horizontalWindAngle;
@@ -1724,7 +1724,7 @@ static bool osdDrawSingleElement(uint8_t item)
             break;
         }
 
-    case OSD_VERTICAL_WIND:
+    case OSD_WIND_SPEED_VERTICAL:
         {
             float verticalWindSpeed;
             getEstimatedWindVelocityBodyFrame(NULL, NULL, &verticalWindSpeed);
