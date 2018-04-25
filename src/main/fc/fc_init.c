@@ -669,10 +669,6 @@ void init(void)
 
 #endif // VTX_CONTROL
 
-    // start all timers
-    // TODO - not implemented yet
-    timerStart();
-
     // Now that everything has powered up the voltage and cell count be determined.
     if (feature(FEATURE_VBAT | FEATURE_CURRENT_METER))
         batteryInit();
