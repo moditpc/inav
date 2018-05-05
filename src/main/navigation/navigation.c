@@ -1977,6 +1977,7 @@ static void resetPositionController(void)
 static bool adjustPositionFromRCInput(void)
 {
     bool retValue;
+    static uint32_t brakingModeDisengageAt = 0;
 
     if (STATE(FIXED_WING)) {
         retValue = adjustFixedWingPositionFromRCInput();
@@ -2008,6 +2009,18 @@ static bool adjustPositionFromRCInput(void)
             ) {
                 ENABLE_STATE(NAV_CRUISE_BRAKING);
                 DEBUG_SET(DEBUG_BRAKING, 0, 1);
+
+                //Set forced BRAKING disengage moment
+                brakingModeDisengageAt = millis() + 500;
+            }
+
+            //Forced BRAKING disengage routine
+            if (
+                STATE(NAV_CRUISE_BRAKING) &&
+                brakingModeDisengageAt < millis()
+            ) {
+                DISABLE_STATE(NAV_CRUISE_BRAKING);
+                DEBUG_SET(DEBUG_BRAKING, 0, 0);
             }
 
             /*
