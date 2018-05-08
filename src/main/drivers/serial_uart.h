@@ -83,7 +83,7 @@ typedef struct {
     USART_TypeDef *USARTx;
 } uartPort_t;
 
-serialPort_t *uartOpen(USART_TypeDef *USARTx, serialReceiveCallbackPtr rxCallback, void *rxCallbackData, uint32_t baudRate, portMode_t mode, portOptions_t options);
+serialPort_t *uartOpen(USART_TypeDef *USARTx, serialReceiveCallbackPtr rxCallback, void *rxCallbackData, uint32_t baudRate, portMode_t mode, portOptions_t options, uint32_t rxBufSize, uint32_t txBufSize);
 
 // serialPort API
 void uartWrite(serialPort_t *instance, uint8_t ch);
