@@ -108,6 +108,7 @@ PG_RESET_TEMPLATE(navConfig_t, navConfig,
         .min_rth_distance = 500,      // If closer than 5m - land immediately
         .rth_altitude = 1000,         // 10m
         .rth_abort_threshold = 50000, // 500m - should be safe for all aircraft
+        .max_terrain_follow_altitude = 100,     // max 1m altitude in terrain following mode
     },
 
     // MC-specific
@@ -941,7 +942,7 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_RTH_LANDING(navigationF
             float descentVelLimited = 0;
 
             // A safeguard - if surface altitude sensors is available and it is reading < 50cm altitude - drop to low descend speed
-            if ((posControl.flags.estSurfaceStatus == EST_TRUSTED) && posControl.actualState.agl.pos.z < 50.0f) {
+            if ((posControl.flags.estAglStatus == EST_TRUSTED) && posControl.actualState.agl.pos.z < 50.0f) {
                 // land_descent_rate == 200 : descend speed = 30 cm/s, gentle touchdown
                 // Do not allow descent velocity slower than -30cm/s so the landing detector works.
                 descentVelLimited = MIN(-0.15f * navConfig()->general.land_descent_rate, -30.0f);
@@ -1454,25 +1455,25 @@ void updateActualAltitudeAndClimbRate(bool estimateValid, float newAltitude, flo
         updateDesiredRTHAltitude();
 
         // If we acquired new surface reference - changing from NONE/USABLE -> TRUSTED
-        if ((surfaceStatus == EST_TRUSTED) && (posControl.flags.estSurfaceStatus != EST_TRUSTED)) {
+        if ((surfaceStatus == EST_TRUSTED) && (posControl.flags.estAglStatus != EST_TRUSTED)) {
             // If we are in terrain-following modes - signal that we should update the surface tracking setpoint
             //      NONE/USABLE means that we were flying blind, now we should lock to surface
             //updateSurfaceTrackingSetpoint();
         }
 
-        posControl.flags.estSurfaceStatus = surfaceStatus;  // Could be TRUSTED or USABLE
+        posControl.flags.estAglStatus = surfaceStatus;  // Could be TRUSTED or USABLE
         posControl.flags.estAltStatus = EST_TRUSTED;
         posControl.flags.verticalPositionDataNew = 1;
         posControl.lastValidAltitudeTimeMs = millis();
     }
     else {
         posControl.flags.estAltStatus = EST_NONE;
-        posControl.flags.estSurfaceStatus = EST_NONE;
+        posControl.flags.estAglStatus = EST_NONE;
         posControl.flags.verticalPositionDataNew = 0;
     }
 
     if (ARMING_FLAG(ARMED)) {
-        if ((posControl.flags.estSurfaceStatus == EST_TRUSTED) && surfaceDistance > 0) {
+        if ((posControl.flags.estAglStatus == EST_TRUSTED) && surfaceDistance > 0) {
             if (posControl.actualState.surfaceMin > 0) {
                 posControl.actualState.surfaceMin = MIN(posControl.actualState.surfaceMin, surfaceDistance);
             }
@@ -2213,7 +2214,7 @@ void applyWaypointNavigationAndAltitudeHold(void)
 #if defined(NAV_BLACKBOX)
     navFlags = 0;
     if (posControl.flags.estAltStatus == EST_TRUSTED)       navFlags |= (1 << 0);
-    if (posControl.flags.estSurfaceStatus == EST_TRUSTED)   navFlags |= (1 << 1);
+    if (posControl.flags.estAglStatus == EST_TRUSTED)   navFlags |= (1 << 1);
     if (posControl.flags.estPosStatue == EST_TRUSTED)       navFlags |= (1 << 2);
 #if defined(NAV_GPS_GLITCH_DETECTION)
     if (isGPSGlitchDetected())                              navFlags |= (1 << 4);
@@ -2583,7 +2584,7 @@ void navigationInit(void)
     posControl.flags.estAltStatus = EST_NONE;
     posControl.flags.estPosStatue = EST_NONE;
     posControl.flags.estHeadingStatus = EST_NONE;
-    posControl.flags.estSurfaceStatus = EST_NONE;
+    posControl.flags.estAglStatus = EST_NONE;
 
     posControl.flags.forcedRTHActivated = 0;
     posControl.waypointCount = 0;

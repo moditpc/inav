@@ -101,32 +101,50 @@ static void updateAltitudeThrottleController_MC(timeDelta_t deltaMicros)
 
 bool adjustMulticopterAltitudeFromRCInput(void)
 {
-    const int16_t rcThrottleAdjustment = applyDeadband(rcCommand[THROTTLE] - altHoldThrottleRCZero, rcControlsConfig()->alt_hold_deadband);
-    if (rcThrottleAdjustment) {
-        // set velocity proportional to stick movement
-        float rcClimbRate;
+    if (posControl.flags.isTerrainFollowEnabled) {
+        const float altTarget = scaleRangef(rcCommand[THROTTLE], motorConfig()->minthrottle, motorConfig()->maxthrottle, 0, navConfig()->general.max_terrain_follow_altitude);
 
-        // Make sure we can satisfy max_manual_climb_rate in both up and down directions
-        if (rcThrottleAdjustment > 0) {
-            // Scaling from altHoldThrottleRCZero to maxthrottle
-            rcClimbRate = rcThrottleAdjustment * navConfig()->general.max_manual_climb_rate / (motorConfig()->maxthrottle - altHoldThrottleRCZero - rcControlsConfig()->alt_hold_deadband);
+        // In terrain follow mode we apply different logic for terrain control
+        if (posControl.flags.estAglStatus == EST_TRUSTED && altTarget > 10.0f) {
+            // We have solid terrain sensor signal - directly map throttle to altitude
+            updateClimbRateToAltitudeController(0, ROC_TO_ALT_RESET);
+            posControl.desiredState.pos.z = altTarget;
         }
         else {
-            // Scaling from minthrottle to altHoldThrottleRCZero
-            rcClimbRate = rcThrottleAdjustment * navConfig()->general.max_manual_climb_rate / (altHoldThrottleRCZero - motorConfig()->minthrottle - rcControlsConfig()->alt_hold_deadband);
+            updateClimbRateToAltitudeController(-30.0f, ROC_TO_ALT_NORMAL);
         }
 
-        updateClimbRateToAltitudeController(rcClimbRate, ROC_TO_ALT_NORMAL);
-
+        // In surface tracking we always indicate that we're adjusting altitude
         return true;
     }
     else {
-        // Adjusting finished - reset desired position to stay exactly where pilot released the stick
-        if (posControl.flags.isAdjustingAltitude) {
-            updateClimbRateToAltitudeController(0, ROC_TO_ALT_RESET);
-        }
+        const int16_t rcThrottleAdjustment = applyDeadband(rcCommand[THROTTLE] - altHoldThrottleRCZero, rcControlsConfig()->alt_hold_deadband);
+        if (rcThrottleAdjustment) {
+            // set velocity proportional to stick movement
+            float rcClimbRate;
 
-        return false;
+            // Make sure we can satisfy max_manual_climb_rate in both up and down directions
+            if (rcThrottleAdjustment > 0) {
+                // Scaling from altHoldThrottleRCZero to maxthrottle
+                rcClimbRate = rcThrottleAdjustment * navConfig()->general.max_manual_climb_rate / (motorConfig()->maxthrottle - altHoldThrottleRCZero - rcControlsConfig()->alt_hold_deadband);
+            }
+            else {
+                // Scaling from minthrottle to altHoldThrottleRCZero
+                rcClimbRate = rcThrottleAdjustment * navConfig()->general.max_manual_climb_rate / (altHoldThrottleRCZero - motorConfig()->minthrottle - rcControlsConfig()->alt_hold_deadband);
+            }
+
+            updateClimbRateToAltitudeController(rcClimbRate, ROC_TO_ALT_NORMAL);
+
+            return true;
+        }
+        else {
+            // Adjusting finished - reset desired position to stay exactly where pilot released the stick
+            if (posControl.flags.isAdjustingAltitude) {
+                updateClimbRateToAltitudeController(0, ROC_TO_ALT_RESET);
+            }
+
+            return false;
+        }
     }
 }
 
@@ -160,7 +178,7 @@ void setupMulticopterAltitudeController(void)
 
 void resetMulticopterAltitudeController(void)
 {
-    navEstimatedPosVel_t * posToUse = navGetCurrentActualPositionAndVelocity();
+    const navEstimatedPosVel_t * posToUse = navGetCurrentActualPositionAndVelocity();
 
     navPidReset(&posControl.pids.vel[Z]);
     navPidReset(&posControl.pids.surface);
@@ -509,7 +527,7 @@ bool isMulticopterLandingDetected(void)
     DEBUG_SET(DEBUG_NAV_LANDING_DETECTOR, 2, (currentTimeUs - landingTimer) / 1000);
 
     // If we have surface sensor (for example sonar) - use it to detect touchdown
-    if ((posControl.flags.estSurfaceStatus == EST_TRUSTED) && (posControl.actualState.agl.pos.z >= 0)) {
+    if ((posControl.flags.estAglStatus == EST_TRUSTED) && (posControl.actualState.agl.pos.z >= 0)) {
         // TODO: Come up with a clever way to let sonar increase detection performance, not just add extra safety.
         // TODO: Out of range sonar may give reading that looks like we landed, find a way to check if sonar is healthy.
         // surfaceMin is our ground reference. If we are less than 5cm above the ground - we are likely landed

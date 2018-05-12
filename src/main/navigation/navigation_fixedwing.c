@@ -474,7 +474,7 @@ void applyFixedWingPitchRollThrottleController(navigationFSMStateFlags_t navStat
      */
     if (navStateFlags & NAV_CTL_LAND) {
         if ( ((posControl.flags.estAltStatus >= EST_USABLE) && (navGetCurrentActualPositionAndVelocity()->pos.z <= navConfig()->general.land_slowdown_minalt)) ||
-             ((posControl.flags.estSurfaceStatus == EST_TRUSTED) && (posControl.actualState.agl.pos.z <= navConfig()->general.land_slowdown_minalt)) ) {
+             ((posControl.flags.estAglStatus == EST_TRUSTED) && (posControl.actualState.agl.pos.z <= navConfig()->general.land_slowdown_minalt)) ) {
             /*
              * Set motor to min. throttle and stop it when MOTOR_STOP feature is enabled
              */
