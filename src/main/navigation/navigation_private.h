@@ -71,7 +71,7 @@ typedef struct navigationFlags_s {
     bool verticalPositionDataConsumed;
 
     navigationEstimateStatus_e estAltStatus;        // Indicates that we have a working altitude sensor (got at least one valid reading from it)
-    navigationEstimateStatus_e estPosStatue;        // Indicates that GPS is working (or not)
+    navigationEstimateStatus_e estPosStatus;        // Indicates that GPS is working (or not)
     navigationEstimateStatus_e estAglStatus;
     navigationEstimateStatus_e estHeadingStatus;    // Indicate valid heading - wither mag or GPS at certain speed on airplane
 

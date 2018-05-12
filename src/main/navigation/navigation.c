@@ -737,7 +737,7 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_RTH_INITIALIZE(navigati
     }
 
     // If we have valid position sensor or configured to ignore it's loss at initial stage - continue
-    if ((posControl.flags.estPosStatue >= EST_USABLE) || navConfig()->general.flags.rth_climb_ignore_emerg) {
+    if ((posControl.flags.estPosStatus >= EST_USABLE) || navConfig()->general.flags.rth_climb_ignore_emerg) {
         // Reset altitude and position controllers if necessary
         if ((prevFlags & NAV_CTL_POS) == 0) {
             resetPositionController();
@@ -796,7 +796,7 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_RTH_CLIMB_TO_SAFE_ALT(n
     }
 
     // If we have valid pos sensor OR we are configured to ignore GPS loss
-    if ((posControl.flags.estPosStatue >= EST_USABLE) || !checkForPositionSensorTimeout() || navConfig()->general.flags.rth_climb_ignore_emerg) {
+    if ((posControl.flags.estPosStatus >= EST_USABLE) || !checkForPositionSensorTimeout() || navConfig()->general.flags.rth_climb_ignore_emerg) {
         const float rthAltitudeMargin = STATE(FIXED_WING) ?
                 MAX(FW_RTH_CLIMB_MARGIN_MIN_CM, (FW_RTH_CLIMB_MARGIN_PERCENT/100.0) * ABS(posControl.homeWaypointAbove.pos.z - posControl.homePosition.pos.z)) :  // Airplane
                 MAX(MR_RTH_CLIMB_MARGIN_MIN_CM, (MR_RTH_CLIMB_MARGIN_PERCENT/100.0) * ABS(posControl.homeWaypointAbove.pos.z - posControl.homePosition.pos.z));   // Copters
@@ -856,7 +856,7 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_RTH_HEAD_HOME(navigatio
     }
 
     // If we have position sensor - continue home
-    if ((posControl.flags.estPosStatue >= EST_USABLE)) {
+    if ((posControl.flags.estPosStatus >= EST_USABLE)) {
         if (isWaypointReached(&posControl.homeWaypointAbove, true)) {
             // Successfully reached position target - update XYZ-position
             setDesiredPosition(&posControl.homeWaypointAbove.pos, posControl.homeWaypointAbove.yaw, NAV_POS_UPDATE_XY | NAV_POS_UPDATE_Z | NAV_POS_UPDATE_HEADING);
@@ -896,7 +896,7 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_RTH_HOVER_PRIOR_TO_LAND
     }
 
     // If position ok OR within valid timeout - continue
-    if ((posControl.flags.estPosStatue >= EST_USABLE) || !checkForPositionSensorTimeout()) {
+    if ((posControl.flags.estPosStatus >= EST_USABLE) || !checkForPositionSensorTimeout()) {
         // Wait until target heading is reached (with 15 deg margin for error)
         if (STATE(FIXED_WING)) {
             resetLandingDetector();
@@ -1027,7 +1027,7 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_WAYPOINT_IN_PROGRESS(na
     UNUSED(previousState);
 
     // If no position sensor available - land immediately
-    if ((posControl.flags.estPosStatue >= EST_USABLE) && (posControl.flags.estHeadingStatus >= EST_USABLE)) {
+    if ((posControl.flags.estPosStatus >= EST_USABLE) && (posControl.flags.estHeadingStatus >= EST_USABLE)) {
         const bool isDoingRTH = (posControl.waypointList[posControl.activeWaypointIndex].action == NAV_WP_ACTION_RTH);
 
         switch (posControl.waypointList[posControl.activeWaypointIndex].action) {
@@ -1111,7 +1111,7 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_WAYPOINT_FINISHED(navig
     UNUSED(previousState);
 
     // If no position sensor available - land immediately
-    if ((posControl.flags.estPosStatue >= EST_USABLE) && (posControl.flags.estHeadingStatus >= EST_USABLE)) {
+    if ((posControl.flags.estPosStatus >= EST_USABLE) && (posControl.flags.estHeadingStatus >= EST_USABLE)) {
         return NAV_FSM_EVENT_NONE;
     }
     /* No pos sensor available for NAV_WAIT_FOR_GPS_TIMEOUT_MS - land */
@@ -1391,7 +1391,7 @@ bool isThrustFacingDownwards(void)
 bool checkForPositionSensorTimeout(void)
 {
     if (navConfig()->general.pos_failure_timeout) {
-        if ((posControl.flags.estPosStatue == EST_NONE) && ((millis() - posControl.lastValidPositionTimeMs) > (1000 * navConfig()->general.pos_failure_timeout))) {
+        if ((posControl.flags.estPosStatus == EST_NONE) && ((millis() - posControl.lastValidPositionTimeMs) > (1000 * navConfig()->general.pos_failure_timeout))) {
             return true;
         }
         else {
@@ -1422,12 +1422,12 @@ void updateActualHorizontalPositionAndVelocity(bool estimateValid, float newX, f
     posControl.actualState.velXY = sqrtf(sq(newVelX) + sq(newVelY));
 
     if (estimateValid) {
-        posControl.flags.estPosStatue = EST_TRUSTED;
+        posControl.flags.estPosStatus = EST_TRUSTED;
         posControl.flags.horizontalPositionDataNew = 1;
         posControl.lastValidPositionTimeMs = millis();
     }
     else {
-        posControl.flags.estPosStatue = EST_NONE;
+        posControl.flags.estPosStatus = EST_NONE;
         posControl.flags.horizontalPositionDataNew = 0;
     }
 
@@ -1682,7 +1682,7 @@ void updateHomePosition(void)
 {
     // Disarmed and have a valid position, constantly update home
     if (!ARMING_FLAG(ARMED)) {
-        if (posControl.flags.estPosStatue >= EST_USABLE) {
+        if (posControl.flags.estPosStatus >= EST_USABLE) {
             bool setHome = !posControl.flags.isHomeValid;
             switch ((nav_reset_type_e)positionEstimationConfig()->reset_home_type) {
                 case NAV_RESET_NEVER:
@@ -1704,7 +1704,7 @@ void updateHomePosition(void)
 
         // If pilot so desires he may reset home position to current position
         if (IS_RC_MODE_ACTIVE(BOXHOMERESET)) {
-            if (isHomeResetAllowed && !FLIGHT_MODE(FAILSAFE_MODE) && !FLIGHT_MODE(NAV_RTH_MODE) && !FLIGHT_MODE(NAV_WP_MODE) && (posControl.flags.estPosStatue >= EST_USABLE)) {
+            if (isHomeResetAllowed && !FLIGHT_MODE(FAILSAFE_MODE) && !FLIGHT_MODE(NAV_RTH_MODE) && !FLIGHT_MODE(NAV_WP_MODE) && (posControl.flags.estPosStatus >= EST_USABLE)) {
                 const navSetWaypointFlags_t homeUpdateFlags = STATE(GPS_FIX_HOME) ? (NAV_POS_UPDATE_XY | NAV_POS_UPDATE_HEADING) : (NAV_POS_UPDATE_XY | NAV_POS_UPDATE_Z | NAV_POS_UPDATE_HEADING);
                 setHomePosition(&posControl.actualState.abs.pos, posControl.actualState.yaw, homeUpdateFlags);
                 isHomeResetAllowed = false;
@@ -1998,7 +1998,7 @@ void setWaypoint(uint8_t wpNumber, const navWaypoint_t * wpData)
     wpLLH.alt = wpData->alt;
 
     // WP #0 - special waypoint - HOME
-    if ((wpNumber == 0) && ARMING_FLAG(ARMED) && (posControl.flags.estPosStatue >= EST_USABLE) && posControl.gpsOrigin.valid && posControl.flags.isGCSAssistedNavigationEnabled) {
+    if ((wpNumber == 0) && ARMING_FLAG(ARMED) && (posControl.flags.estPosStatus >= EST_USABLE) && posControl.gpsOrigin.valid && posControl.flags.isGCSAssistedNavigationEnabled) {
         // Forcibly set home position. Note that this is only valid if already armed, otherwise home will be reset instantly
         geoConvertGeodeticToLocal(&posControl.gpsOrigin, &wpLLH, &wpPos.pos, GEO_ALT_RELATIVE);
         setHomePosition(&wpPos.pos, 0, NAV_POS_UPDATE_XY | NAV_POS_UPDATE_Z | NAV_POS_UPDATE_HEADING);
@@ -2006,7 +2006,7 @@ void setWaypoint(uint8_t wpNumber, const navWaypoint_t * wpData)
     // WP #255 - special waypoint - directly set desiredPosition
     // Only valid when armed and in poshold mode
     else if ((wpNumber == 255) && (wpData->action == NAV_WP_ACTION_WAYPOINT) &&
-             ARMING_FLAG(ARMED) && (posControl.flags.estPosStatue >= EST_USABLE) && posControl.gpsOrigin.valid && posControl.flags.isGCSAssistedNavigationEnabled &&
+             ARMING_FLAG(ARMED) && (posControl.flags.estPosStatus >= EST_USABLE) && posControl.gpsOrigin.valid && posControl.flags.isGCSAssistedNavigationEnabled &&
              (posControl.navState == NAV_STATE_POSHOLD_3D_IN_PROGRESS)) {
         // Convert to local coordinates
         geoConvertGeodeticToLocal(&posControl.gpsOrigin, &wpLLH, &wpPos.pos, GEO_ALT_RELATIVE);
@@ -2215,7 +2215,7 @@ void applyWaypointNavigationAndAltitudeHold(void)
     navFlags = 0;
     if (posControl.flags.estAltStatus == EST_TRUSTED)       navFlags |= (1 << 0);
     if (posControl.flags.estAglStatus == EST_TRUSTED)   navFlags |= (1 << 1);
-    if (posControl.flags.estPosStatue == EST_TRUSTED)       navFlags |= (1 << 2);
+    if (posControl.flags.estPosStatus == EST_TRUSTED)       navFlags |= (1 << 2);
 #if defined(NAV_GPS_GLITCH_DETECTION)
     if (isGPSGlitchDetected())                              navFlags |= (1 << 4);
 #endif
@@ -2285,7 +2285,7 @@ static bool canActivateAltHoldMode(void)
 
 static bool canActivatePosHoldMode(void)
 {
-    return (posControl.flags.estPosStatue >= EST_USABLE) && (posControl.flags.estHeadingStatus >= EST_USABLE);
+    return (posControl.flags.estPosStatus >= EST_USABLE) && (posControl.flags.estHeadingStatus >= EST_USABLE);
 }
 
 static bool posEstimationHasGlobalReference(void)
@@ -2443,7 +2443,7 @@ bool navigationBlockArming(void)
         return false;
 
     // Apply extra arming safety only if pilot has any of GPS modes configured
-    if ((isUsingNavigationModes() || failsafeMayRequireNavigationMode()) && !((posControl.flags.estPosStatue >= EST_USABLE) && STATE(GPS_FIX_HOME))) {
+    if ((isUsingNavigationModes() || failsafeMayRequireNavigationMode()) && !((posControl.flags.estPosStatus >= EST_USABLE) && STATE(GPS_FIX_HOME))) {
         shouldBlockArming = true;
     }
 
@@ -2470,7 +2470,7 @@ bool navigationBlockArming(void)
 
 bool navigationPositionEstimateIsHealthy(void)
 {
-    return (posControl.flags.estPosStatue >= EST_USABLE) && STATE(GPS_FIX_HOME);
+    return (posControl.flags.estPosStatus >= EST_USABLE) && STATE(GPS_FIX_HOME);
 }
 
 /**
@@ -2582,7 +2582,7 @@ void navigationInit(void)
     posControl.flags.headingDataNew = 0;
 
     posControl.flags.estAltStatus = EST_NONE;
-    posControl.flags.estPosStatue = EST_NONE;
+    posControl.flags.estPosStatus = EST_NONE;
     posControl.flags.estHeadingStatus = EST_NONE;
     posControl.flags.estAglStatus = EST_NONE;
 
