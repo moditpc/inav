@@ -275,6 +275,7 @@ int8_t navigationGetHeadingControlState(void);
 bool navigationBlockArming(void);
 bool navigationPositionEstimateIsHealthy(void);
 bool navIsCalibrationComplete(void);
+bool navigationTerrainFollowingEnabled(void);
 
 /* Access to estimated position and velocity */
 float getEstimatedActualVelocity(int axis);
@@ -335,7 +336,6 @@ extern int16_t navActualVelocity[3];
 extern int16_t navDesiredVelocity[3];
 extern int16_t navTargetPosition[3];
 extern int32_t navLatestActualPosition[3];
-extern int16_t navTargetSurface;
 extern int16_t navActualSurface;
 extern uint16_t navFlags;
 extern uint16_t navEPH;

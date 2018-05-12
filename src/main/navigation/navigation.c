@@ -158,7 +158,6 @@ int16_t navActualHeading;
 int16_t navDesiredHeading;
 int16_t navTargetPosition[3];
 int32_t navLatestActualPosition[3];
-int16_t navTargetSurface;
 int16_t navActualSurface;
 uint16_t navFlags;
 uint16_t navEPH;
@@ -167,10 +166,10 @@ int16_t navAccNEU[3];
 #endif
 
 static void updateDesiredRTHAltitude(void);
-static void resetAltitudeController(void);
+static void resetAltitudeController(bool useTerrainFollowing);
 static void resetPositionController(void);
 static void setupAltitudeController(void);
-void resetNavigation(void);
+static void resetHeadingController(void);
 void resetGCSFlags(void);
 
 static bool posEstimationHasGlobalReference(void);
@@ -186,8 +185,6 @@ bool validateRTHSanityChecker(void);
 static navigationFSMEvent_t navOnEnteringState_NAV_STATE_IDLE(navigationFSMState_t previousState);
 static navigationFSMEvent_t navOnEnteringState_NAV_STATE_ALTHOLD_INITIALIZE(navigationFSMState_t previousState);
 static navigationFSMEvent_t navOnEnteringState_NAV_STATE_ALTHOLD_IN_PROGRESS(navigationFSMState_t previousState);
-static navigationFSMEvent_t navOnEnteringState_NAV_STATE_POSHOLD_2D_INITIALIZE(navigationFSMState_t previousState);
-static navigationFSMEvent_t navOnEnteringState_NAV_STATE_POSHOLD_2D_IN_PROGRESS(navigationFSMState_t previousState);
 static navigationFSMEvent_t navOnEnteringState_NAV_STATE_POSHOLD_3D_INITIALIZE(navigationFSMState_t previousState);
 static navigationFSMEvent_t navOnEnteringState_NAV_STATE_POSHOLD_3D_IN_PROGRESS(navigationFSMState_t previousState);
 static navigationFSMEvent_t navOnEnteringState_NAV_STATE_RTH_INITIALIZE(navigationFSMState_t previousState);
@@ -222,7 +219,6 @@ static const navigationFSMStateDescriptor_t navFSM[NAV_STATE_COUNT] = {
         .mwError = MW_NAV_ERROR_NONE,
         .onEvent = {
             [NAV_FSM_EVENT_SWITCH_TO_ALTHOLD]           = NAV_STATE_ALTHOLD_INITIALIZE,
-            [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_2D]        = NAV_STATE_POSHOLD_2D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_3D]        = NAV_STATE_POSHOLD_3D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_RTH]               = NAV_STATE_RTH_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_WAYPOINT]          = NAV_STATE_WAYPOINT_INITIALIZE,
@@ -256,40 +252,6 @@ static const navigationFSMStateDescriptor_t navFSM[NAV_STATE_COUNT] = {
         .onEvent = {
             [NAV_FSM_EVENT_TIMEOUT]                     = NAV_STATE_ALTHOLD_IN_PROGRESS,    // re-process the state
             [NAV_FSM_EVENT_SWITCH_TO_IDLE]              = NAV_STATE_IDLE,
-            [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_2D]        = NAV_STATE_POSHOLD_2D_INITIALIZE,
-            [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_3D]        = NAV_STATE_POSHOLD_3D_INITIALIZE,
-            [NAV_FSM_EVENT_SWITCH_TO_RTH]               = NAV_STATE_RTH_INITIALIZE,
-            [NAV_FSM_EVENT_SWITCH_TO_WAYPOINT]          = NAV_STATE_WAYPOINT_INITIALIZE,
-            [NAV_FSM_EVENT_SWITCH_TO_EMERGENCY_LANDING] = NAV_STATE_EMERGENCY_LANDING_INITIALIZE,
-        }
-    },
-
-    /** POSHOLD_2D mode ************************************************/
-    [NAV_STATE_POSHOLD_2D_INITIALIZE] = {
-        .onEntry = navOnEnteringState_NAV_STATE_POSHOLD_2D_INITIALIZE,
-        .timeoutMs = 0,
-        .stateFlags = NAV_CTL_POS | NAV_REQUIRE_ANGLE,
-        .mapToFlightModes = NAV_POSHOLD_MODE,
-        .mwState = MW_NAV_STATE_HOLD_INFINIT,
-        .mwError = MW_NAV_ERROR_NONE,
-        .onEvent = {
-            [NAV_FSM_EVENT_SUCCESS]                     = NAV_STATE_POSHOLD_2D_IN_PROGRESS,
-            [NAV_FSM_EVENT_ERROR]                       = NAV_STATE_IDLE,
-            [NAV_FSM_EVENT_SWITCH_TO_IDLE]              = NAV_STATE_IDLE,
-        }
-    },
-
-    [NAV_STATE_POSHOLD_2D_IN_PROGRESS] = {
-        .onEntry = navOnEnteringState_NAV_STATE_POSHOLD_2D_IN_PROGRESS,
-        .timeoutMs = 10,
-        .stateFlags = NAV_CTL_POS | NAV_CTL_YAW | NAV_REQUIRE_ANGLE | NAV_RC_POS | NAV_RC_YAW,
-        .mapToFlightModes = NAV_POSHOLD_MODE,
-        .mwState = MW_NAV_STATE_HOLD_INFINIT,
-        .mwError = MW_NAV_ERROR_NONE,
-        .onEvent = {
-            [NAV_FSM_EVENT_TIMEOUT]                     = NAV_STATE_POSHOLD_2D_IN_PROGRESS,    // re-process the state
-            [NAV_FSM_EVENT_SWITCH_TO_IDLE]              = NAV_STATE_IDLE,
-            [NAV_FSM_EVENT_SWITCH_TO_ALTHOLD]           = NAV_STATE_ALTHOLD_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_3D]        = NAV_STATE_POSHOLD_3D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_RTH]               = NAV_STATE_RTH_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_WAYPOINT]          = NAV_STATE_WAYPOINT_INITIALIZE,
@@ -323,7 +285,6 @@ static const navigationFSMStateDescriptor_t navFSM[NAV_STATE_COUNT] = {
             [NAV_FSM_EVENT_TIMEOUT]                     = NAV_STATE_POSHOLD_3D_IN_PROGRESS,    // re-process the state
             [NAV_FSM_EVENT_SWITCH_TO_IDLE]              = NAV_STATE_IDLE,
             [NAV_FSM_EVENT_SWITCH_TO_ALTHOLD]           = NAV_STATE_ALTHOLD_INITIALIZE,
-            [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_2D]        = NAV_STATE_POSHOLD_2D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_RTH]               = NAV_STATE_RTH_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_WAYPOINT]          = NAV_STATE_WAYPOINT_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_EMERGENCY_LANDING] = NAV_STATE_EMERGENCY_LANDING_INITIALIZE,
@@ -359,7 +320,6 @@ static const navigationFSMStateDescriptor_t navFSM[NAV_STATE_COUNT] = {
             [NAV_FSM_EVENT_SUCCESS]                     = NAV_STATE_RTH_HEAD_HOME,
             [NAV_FSM_EVENT_SWITCH_TO_IDLE]              = NAV_STATE_IDLE,
             [NAV_FSM_EVENT_SWITCH_TO_ALTHOLD]           = NAV_STATE_ALTHOLD_INITIALIZE,
-            [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_2D]        = NAV_STATE_POSHOLD_2D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_3D]        = NAV_STATE_POSHOLD_3D_INITIALIZE,
         }
     },
@@ -376,7 +336,6 @@ static const navigationFSMStateDescriptor_t navFSM[NAV_STATE_COUNT] = {
             [NAV_FSM_EVENT_SUCCESS]                     = NAV_STATE_RTH_HOVER_PRIOR_TO_LANDING,
             [NAV_FSM_EVENT_SWITCH_TO_IDLE]              = NAV_STATE_IDLE,
             [NAV_FSM_EVENT_SWITCH_TO_ALTHOLD]           = NAV_STATE_ALTHOLD_INITIALIZE,
-            [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_2D]        = NAV_STATE_POSHOLD_2D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_3D]        = NAV_STATE_POSHOLD_3D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_EMERGENCY_LANDING] = NAV_STATE_EMERGENCY_LANDING_INITIALIZE,
         }
@@ -394,7 +353,6 @@ static const navigationFSMStateDescriptor_t navFSM[NAV_STATE_COUNT] = {
             [NAV_FSM_EVENT_SUCCESS]                     = NAV_STATE_RTH_LANDING,
             [NAV_FSM_EVENT_SWITCH_TO_IDLE]              = NAV_STATE_IDLE,
             [NAV_FSM_EVENT_SWITCH_TO_ALTHOLD]           = NAV_STATE_ALTHOLD_INITIALIZE,
-            [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_2D]        = NAV_STATE_POSHOLD_2D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_3D]        = NAV_STATE_POSHOLD_3D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_EMERGENCY_LANDING] = NAV_STATE_EMERGENCY_LANDING_INITIALIZE,
         }
@@ -412,7 +370,6 @@ static const navigationFSMStateDescriptor_t navFSM[NAV_STATE_COUNT] = {
             [NAV_FSM_EVENT_SUCCESS]                     = NAV_STATE_RTH_FINISHING,
             [NAV_FSM_EVENT_SWITCH_TO_IDLE]              = NAV_STATE_IDLE,
             [NAV_FSM_EVENT_SWITCH_TO_ALTHOLD]           = NAV_STATE_ALTHOLD_INITIALIZE,
-            [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_2D]        = NAV_STATE_POSHOLD_2D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_3D]        = NAV_STATE_POSHOLD_3D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_EMERGENCY_LANDING] = NAV_STATE_EMERGENCY_LANDING_INITIALIZE,
         }
@@ -442,7 +399,6 @@ static const navigationFSMStateDescriptor_t navFSM[NAV_STATE_COUNT] = {
             [NAV_FSM_EVENT_TIMEOUT]                     = NAV_STATE_RTH_FINISHED,         // re-process state
             [NAV_FSM_EVENT_SWITCH_TO_IDLE]              = NAV_STATE_IDLE,
             [NAV_FSM_EVENT_SWITCH_TO_ALTHOLD]           = NAV_STATE_ALTHOLD_INITIALIZE,
-            [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_2D]        = NAV_STATE_POSHOLD_2D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_3D]        = NAV_STATE_POSHOLD_3D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_EMERGENCY_LANDING] = NAV_STATE_EMERGENCY_LANDING_INITIALIZE,
         }
@@ -491,7 +447,6 @@ static const navigationFSMStateDescriptor_t navFSM[NAV_STATE_COUNT] = {
             [NAV_FSM_EVENT_SUCCESS]                     = NAV_STATE_WAYPOINT_REACHED,       // successfully reached waypoint
             [NAV_FSM_EVENT_SWITCH_TO_IDLE]              = NAV_STATE_IDLE,
             [NAV_FSM_EVENT_SWITCH_TO_ALTHOLD]           = NAV_STATE_ALTHOLD_INITIALIZE,
-            [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_2D]        = NAV_STATE_POSHOLD_2D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_3D]        = NAV_STATE_POSHOLD_3D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_RTH]               = NAV_STATE_RTH_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_EMERGENCY_LANDING] = NAV_STATE_EMERGENCY_LANDING_INITIALIZE,
@@ -512,7 +467,6 @@ static const navigationFSMStateDescriptor_t navFSM[NAV_STATE_COUNT] = {
             [NAV_FSM_EVENT_SWITCH_TO_WAYPOINT_RTH_LAND] = NAV_STATE_WAYPOINT_RTH_LAND,
             [NAV_FSM_EVENT_SWITCH_TO_IDLE]              = NAV_STATE_IDLE,
             [NAV_FSM_EVENT_SWITCH_TO_ALTHOLD]           = NAV_STATE_ALTHOLD_INITIALIZE,
-            [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_2D]        = NAV_STATE_POSHOLD_2D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_3D]        = NAV_STATE_POSHOLD_3D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_RTH]               = NAV_STATE_RTH_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_EMERGENCY_LANDING] = NAV_STATE_EMERGENCY_LANDING_INITIALIZE,
@@ -531,7 +485,6 @@ static const navigationFSMStateDescriptor_t navFSM[NAV_STATE_COUNT] = {
             [NAV_FSM_EVENT_SUCCESS]                     = NAV_STATE_WAYPOINT_FINISHED,
             [NAV_FSM_EVENT_SWITCH_TO_IDLE]              = NAV_STATE_IDLE,
             [NAV_FSM_EVENT_SWITCH_TO_ALTHOLD]           = NAV_STATE_ALTHOLD_INITIALIZE,
-            [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_2D]        = NAV_STATE_POSHOLD_2D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_3D]        = NAV_STATE_POSHOLD_3D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_RTH]               = NAV_STATE_RTH_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_EMERGENCY_LANDING] = NAV_STATE_EMERGENCY_LANDING_INITIALIZE,
@@ -561,7 +514,6 @@ static const navigationFSMStateDescriptor_t navFSM[NAV_STATE_COUNT] = {
         .onEvent = {
             [NAV_FSM_EVENT_SWITCH_TO_IDLE]              = NAV_STATE_IDLE,
             [NAV_FSM_EVENT_SWITCH_TO_ALTHOLD]           = NAV_STATE_ALTHOLD_INITIALIZE,
-            [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_2D]        = NAV_STATE_POSHOLD_2D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_POSHOLD_3D]        = NAV_STATE_POSHOLD_3D_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_RTH]               = NAV_STATE_RTH_INITIALIZE,
             [NAV_FSM_EVENT_SWITCH_TO_EMERGENCY_LANDING] = NAV_STATE_EMERGENCY_LANDING_INITIALIZE,
@@ -672,27 +624,39 @@ navigationFSMStateFlags_t navGetCurrentStateFlags(void)
     return navGetStateFlags(posControl.navState);
 }
 
+static bool navTerrainFollowingRequested(void)
+{
+    // Terrain following not supported on FIXED WING aircraft yet
+    return !STATE(FIXED_WING) && IS_RC_MODE_ACTIVE(BOXSURFACE);
+}
+
 /*************************************************************************************************/
 static navigationFSMEvent_t navOnEnteringState_NAV_STATE_IDLE(navigationFSMState_t previousState)
 {
     UNUSED(previousState);
-    resetNavigation();
+
+    resetAltitudeController(false);
+    resetHeadingController();
+    resetPositionController();
+
     return NAV_FSM_EVENT_NONE;
 }
 
 static navigationFSMEvent_t navOnEnteringState_NAV_STATE_ALTHOLD_INITIALIZE(navigationFSMState_t previousState)
 {
     const navigationFSMStateFlags_t prevFlags = navGetStateFlags(previousState);
+    const bool terrainFollowingToggled = (posControl.flags.isTerrainFollowEnabled != navTerrainFollowingRequested());
 
     resetGCSFlags();
 
-    if ((prevFlags & NAV_CTL_ALT) == 0) {
-        resetAltitudeController();
+    // If surface tracking mode changed value - reset altitude controller
+    if ((prevFlags & NAV_CTL_ALT) == 0 || terrainFollowingToggled) {
+        resetAltitudeController(navTerrainFollowingRequested());
     }
 
-    if (((prevFlags & NAV_CTL_ALT) == 0) || ((prevFlags & NAV_AUTO_RTH) != 0) || ((prevFlags & NAV_AUTO_WP) != 0)) {
+    if (((prevFlags & NAV_CTL_ALT) == 0) || ((prevFlags & NAV_AUTO_RTH) != 0) || ((prevFlags & NAV_AUTO_WP) != 0) || terrainFollowingToggled) {
         setupAltitudeController();
-        setDesiredPosition(&posControl.actualState.pos, posControl.actualState.yaw, NAV_POS_UPDATE_Z);  // This will reset surface offset
+        setDesiredPosition(&navGetCurrentActualPositionAndVelocity()->pos, posControl.actualState.yaw, NAV_POS_UPDATE_Z);  // This will reset surface offset
     }
 
     return NAV_FSM_EVENT_SUCCESS;
@@ -704,41 +668,7 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_ALTHOLD_IN_PROGRESS(nav
 
     // If GCS was disabled - reset altitude setpoint
     if (posControl.flags.isGCSAssistedNavigationReset) {
-        setDesiredPosition(&posControl.actualState.pos, posControl.actualState.yaw, NAV_POS_UPDATE_Z);
-        resetGCSFlags();
-    }
-
-    return NAV_FSM_EVENT_NONE;
-}
-
-static navigationFSMEvent_t navOnEnteringState_NAV_STATE_POSHOLD_2D_INITIALIZE(navigationFSMState_t previousState)
-{
-    const navigationFSMStateFlags_t prevFlags = navGetStateFlags(previousState);
-
-    resetGCSFlags();
-
-    if ((prevFlags & NAV_CTL_POS) == 0) {
-        resetPositionController();
-    }
-
-    if (((prevFlags & NAV_CTL_POS) == 0) || ((prevFlags & NAV_AUTO_RTH) != 0) || ((prevFlags & NAV_AUTO_WP) != 0)) {
-        fpVector3_t targetHoldPos;
-        calculateInitialHoldPosition(&targetHoldPos);
-        setDesiredPosition(&targetHoldPos, posControl.actualState.yaw, NAV_POS_UPDATE_XY | NAV_POS_UPDATE_HEADING);
-    }
-
-    return NAV_FSM_EVENT_SUCCESS;
-}
-
-static navigationFSMEvent_t navOnEnteringState_NAV_STATE_POSHOLD_2D_IN_PROGRESS(navigationFSMState_t previousState)
-{
-    UNUSED(previousState);
-
-    // If GCS was disabled - reset 2D pos setpoint
-    if (posControl.flags.isGCSAssistedNavigationReset) {
-        fpVector3_t targetHoldPos;
-        calculateInitialHoldPosition(&targetHoldPos);
-        setDesiredPosition(&targetHoldPos, posControl.actualState.yaw, NAV_POS_UPDATE_XY | NAV_POS_UPDATE_HEADING);
+        setDesiredPosition(&navGetCurrentActualPositionAndVelocity()->pos, posControl.actualState.yaw, NAV_POS_UPDATE_Z);
         resetGCSFlags();
     }
 
@@ -748,6 +678,7 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_POSHOLD_2D_IN_PROGRESS(
 static navigationFSMEvent_t navOnEnteringState_NAV_STATE_POSHOLD_3D_INITIALIZE(navigationFSMState_t previousState)
 {
     const navigationFSMStateFlags_t prevFlags = navGetStateFlags(previousState);
+    const bool terrainFollowingToggled = (posControl.flags.isTerrainFollowEnabled != navTerrainFollowingRequested());
 
     resetGCSFlags();
 
@@ -755,13 +686,13 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_POSHOLD_3D_INITIALIZE(n
         resetPositionController();
     }
 
-    if ((prevFlags & NAV_CTL_ALT) == 0) {
-        resetAltitudeController();
+    if ((prevFlags & NAV_CTL_ALT) == 0 || terrainFollowingToggled) {
+        resetAltitudeController(navTerrainFollowingRequested());
         setupAltitudeController();
     }
 
-    if (((prevFlags & NAV_CTL_ALT) == 0) || ((prevFlags & NAV_AUTO_RTH) != 0) || ((prevFlags & NAV_AUTO_WP) != 0)) {
-        setDesiredPosition(&posControl.actualState.pos, posControl.actualState.yaw, NAV_POS_UPDATE_Z);  // This will reset surface offset
+    if (((prevFlags & NAV_CTL_ALT) == 0) || ((prevFlags & NAV_AUTO_RTH) != 0) || ((prevFlags & NAV_AUTO_WP) != 0) || terrainFollowingToggled) {
+        setDesiredPosition(&navGetCurrentActualPositionAndVelocity()->pos, posControl.actualState.yaw, NAV_POS_UPDATE_Z);  // This will reset surface offset
     }
 
     if (((prevFlags & NAV_CTL_POS) == 0) || ((prevFlags & NAV_AUTO_RTH) != 0) || ((prevFlags & NAV_AUTO_WP) != 0)) {
@@ -781,7 +712,7 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_POSHOLD_3D_IN_PROGRESS(
     if (posControl.flags.isGCSAssistedNavigationReset) {
         fpVector3_t targetHoldPos;
         calculateInitialHoldPosition(&targetHoldPos);
-        setDesiredPosition(&posControl.actualState.pos, posControl.actualState.yaw, NAV_POS_UPDATE_Z);
+        setDesiredPosition(&navGetCurrentActualPositionAndVelocity()->pos, posControl.actualState.yaw, NAV_POS_UPDATE_Z);
         setDesiredPosition(&targetHoldPos, posControl.actualState.yaw, NAV_POS_UPDATE_XY | NAV_POS_UPDATE_HEADING);
         resetGCSFlags();
     }
@@ -811,15 +742,17 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_RTH_INITIALIZE(navigati
             resetPositionController();
         }
 
-        if ((prevFlags & NAV_CTL_ALT) == 0) {
-            resetAltitudeController();
+        // Reset altitude controller if it was not enabled or if we are in terrain follow mode
+        if ((prevFlags & NAV_CTL_ALT) == 0 || posControl.flags.isTerrainFollowEnabled) {
+            // Make sure surface tracking is not enabled - RTH uses global altitude, not AGL
+            resetAltitudeController(false);
             setupAltitudeController();
         }
 
         // If close to home - reset home position and land
         if (posControl.homeDistance < navConfig()->general.min_rth_distance) {
-            setHomePosition(&posControl.actualState.pos, posControl.actualState.yaw, NAV_POS_UPDATE_XY | NAV_POS_UPDATE_HEADING);
-            setDesiredPosition(&posControl.actualState.pos, posControl.actualState.yaw, NAV_POS_UPDATE_XY | NAV_POS_UPDATE_Z | NAV_POS_UPDATE_HEADING);
+            setHomePosition(&navGetCurrentActualPositionAndVelocity()->pos, posControl.actualState.yaw, NAV_POS_UPDATE_XY | NAV_POS_UPDATE_HEADING);
+            setDesiredPosition(&navGetCurrentActualPositionAndVelocity()->pos, posControl.actualState.yaw, NAV_POS_UPDATE_XY | NAV_POS_UPDATE_Z | NAV_POS_UPDATE_HEADING);
 
             return NAV_FSM_EVENT_SWITCH_TO_RTH_LANDING;   // NAV_STATE_RTH_HOVER_PRIOR_TO_LANDING
         }
@@ -867,10 +800,10 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_RTH_CLIMB_TO_SAFE_ALT(n
                 MAX(FW_RTH_CLIMB_MARGIN_MIN_CM, (FW_RTH_CLIMB_MARGIN_PERCENT/100.0) * ABS(posControl.homeWaypointAbove.pos.z - posControl.homePosition.pos.z)) :  // Airplane
                 MAX(MR_RTH_CLIMB_MARGIN_MIN_CM, (MR_RTH_CLIMB_MARGIN_PERCENT/100.0) * ABS(posControl.homeWaypointAbove.pos.z - posControl.homePosition.pos.z));   // Copters
 
-        if (((posControl.actualState.pos.z - posControl.homeWaypointAbove.pos.z) > -rthAltitudeMargin) || (!navConfig()->general.flags.rth_climb_first)) {
+        if (((navGetCurrentActualPositionAndVelocity()->pos.z - posControl.homeWaypointAbove.pos.z) > -rthAltitudeMargin) || (!navConfig()->general.flags.rth_climb_first)) {
             // Delayed initialization for RTH sanity check on airplanes - allow to finish climb first as it can take some distance
             if (STATE(FIXED_WING)) {
-                initializeRTHSanityChecker(&posControl.actualState.pos);
+                initializeRTHSanityChecker(&navGetCurrentActualPositionAndVelocity()->pos);
             }
 
             return NAV_FSM_EVENT_SUCCESS;   // NAV_STATE_RTH_HEAD_HOME
@@ -1008,14 +941,14 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_RTH_LANDING(navigationF
             float descentVelLimited = 0;
 
             // A safeguard - if surface altitude sensors is available and it is reading < 50cm altitude - drop to low descend speed
-            if ((posControl.flags.estSurfaceStatus == EST_TRUSTED) && posControl.actualState.surface < 50.0f) {
+            if ((posControl.flags.estSurfaceStatus == EST_TRUSTED) && posControl.actualState.agl.pos.z < 50.0f) {
                 // land_descent_rate == 200 : descend speed = 30 cm/s, gentle touchdown
                 // Do not allow descent velocity slower than -30cm/s so the landing detector works.
                 descentVelLimited = MIN(-0.15f * navConfig()->general.land_descent_rate, -30.0f);
             }
             else {
                 // Ramp down descent velocity from 100% at maxAlt altitude to 25% from minAlt to 0cm.
-                float descentVelScaling = (posControl.actualState.pos.z - posControl.homePosition.pos.z - navConfig()->general.land_slowdown_minalt)
+                float descentVelScaling = (navGetCurrentActualPositionAndVelocity()->pos.z - posControl.homePosition.pos.z - navConfig()->general.land_slowdown_minalt)
                                             / (navConfig()->general.land_slowdown_maxalt - navConfig()->general.land_slowdown_minalt) * 0.75f + 0.25f;  // Yield 1.0 at 2000 alt and 0.25 at 500 alt
 
                 descentVelScaling = constrainf(descentVelScaling, 0.25f, 1.0f);
@@ -1060,7 +993,9 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_WAYPOINT_INITIALIZE(nav
     else {
         // Prepare controllers
         resetPositionController();
-        resetAltitudeController();
+
+        // Make sure surface tracking is not enabled - RTH uses global altitude, not AGL
+        resetAltitudeController(false);
         setupAltitudeController();
 
         posControl.activeWaypointIndex = 0;
@@ -1080,7 +1015,7 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_WAYPOINT_PRE_ACTION(nav
 
         case NAV_WP_ACTION_RTH:
         default:
-            initializeRTHSanityChecker(&posControl.actualState.pos);
+            initializeRTHSanityChecker(&navGetCurrentActualPositionAndVelocity()->pos);
             calcualteAndSetActiveWaypointToLocalPosition(&posControl.homeWaypointAbove.pos);
             return NAV_FSM_EVENT_SUCCESS;       // will switch to NAV_STATE_WAYPOINT_IN_PROGRESS
     };
@@ -1193,7 +1128,8 @@ static navigationFSMEvent_t navOnEnteringState_NAV_STATE_EMERGENCY_LANDING_INITI
     UNUSED(previousState);
 
     // Emergency landing MAY use common altitude controller if vertical position is valid - initialize it
-    resetAltitudeController();
+    // Make sure terrain following is not enabled
+    resetAltitudeController(false);
 
     return NAV_FSM_EVENT_SUCCESS;
 }
@@ -1472,11 +1408,16 @@ bool checkForPositionSensorTimeout(void)
  *-----------------------------------------------------------*/
 void updateActualHorizontalPositionAndVelocity(bool estimateValid, float newX, float newY, float newVelX, float newVelY)
 {
-    posControl.actualState.pos.x = newX;
-    posControl.actualState.pos.y = newY;
+    posControl.actualState.abs.pos.x = newX;
+    posControl.actualState.abs.pos.y = newY;
+    posControl.actualState.abs.vel.x = newVelX;
+    posControl.actualState.abs.vel.y = newVelY;
 
-    posControl.actualState.vel.x = newVelX;
-    posControl.actualState.vel.y = newVelY;
+    posControl.actualState.agl.pos.x = newX;
+    posControl.actualState.agl.pos.y = newY;
+    posControl.actualState.agl.vel.x = newVelX;
+    posControl.actualState.agl.vel.y = newVelY;
+
     posControl.actualState.velXY = sqrtf(sq(newVelX) + sq(newVelY));
 
     if (estimateValid) {
@@ -1502,10 +1443,11 @@ void updateActualHorizontalPositionAndVelocity(bool estimateValid, float newX, f
  *-----------------------------------------------------------*/
 void updateActualAltitudeAndClimbRate(bool estimateValid, float newAltitude, float newVelocity, float surfaceDistance, float surfaceVelocity, navigationEstimateStatus_e surfaceStatus)
 {
-    posControl.actualState.pos.z = newAltitude;
-    posControl.actualState.vel.z = newVelocity;
-    posControl.actualState.surface = surfaceDistance;
-    posControl.actualState.surfaceVel = surfaceVelocity;
+    posControl.actualState.abs.pos.z = newAltitude;
+    posControl.actualState.abs.vel.z = newVelocity;
+
+    posControl.actualState.agl.pos.z = surfaceDistance;
+    posControl.actualState.agl.vel.z = surfaceVelocity;
 
     // Update altitude that would be used when executing RTH
     if (estimateValid) {
@@ -1530,12 +1472,12 @@ void updateActualAltitudeAndClimbRate(bool estimateValid, float newAltitude, flo
     }
 
     if (ARMING_FLAG(ARMED)) {
-        if ((posControl.flags.estSurfaceStatus == EST_TRUSTED) && posControl.actualState.surface > 0) {
+        if ((posControl.flags.estSurfaceStatus == EST_TRUSTED) && surfaceDistance > 0) {
             if (posControl.actualState.surfaceMin > 0) {
-                posControl.actualState.surfaceMin = MIN(posControl.actualState.surfaceMin, posControl.actualState.surface);
+                posControl.actualState.surfaceMin = MIN(posControl.actualState.surfaceMin, surfaceDistance);
             }
             else {
-                posControl.actualState.surfaceMin = posControl.actualState.surface;
+                posControl.actualState.surfaceMin = surfaceDistance;
             }
         }
     }
@@ -1544,8 +1486,8 @@ void updateActualAltitudeAndClimbRate(bool estimateValid, float newAltitude, flo
     }
 
 #if defined(NAV_BLACKBOX)
-    navLatestActualPosition[Z] = constrain(posControl.actualState.pos.z, -32678, 32767);
-    navActualVelocity[Z] = constrain(posControl.actualState.vel.z, -32678, 32767);
+    navLatestActualPosition[Z] = constrain(navGetCurrentActualPositionAndVelocity()->pos.z, -32678, 32767);
+    navActualVelocity[Z] = constrain(navGetCurrentActualPositionAndVelocity()->vel.z, -32678, 32767);
 #endif
 }
 
@@ -1566,20 +1508,28 @@ void updateActualHeading(bool headingValid, int32_t newHeading)
 }
 
 /*-----------------------------------------------------------
+ * Returns pointer to currently used position (ABS or AGL) depending on surface tracking status
+ *-----------------------------------------------------------*/
+const navEstimatedPosVel_t * navGetCurrentActualPositionAndVelocity(void)
+{
+    return posControl.flags.isTerrainFollowEnabled ? &posControl.actualState.agl : &posControl.actualState.abs;
+}
+
+/*-----------------------------------------------------------
  * Calculates distance and bearing to destination point
  *-----------------------------------------------------------*/
 uint32_t calculateDistanceToDestination(const fpVector3_t * destinationPos)
 {
-    const float deltaX = destinationPos->x - posControl.actualState.pos.x;
-    const float deltaY = destinationPos->y - posControl.actualState.pos.y;
+    const float deltaX = destinationPos->x - navGetCurrentActualPositionAndVelocity()->pos.x;
+    const float deltaY = destinationPos->y - navGetCurrentActualPositionAndVelocity()->pos.y;
 
     return sqrtf(sq(deltaX) + sq(deltaY));
 }
 
 int32_t calculateBearingToDestination(const fpVector3_t * destinationPos)
 {
-    const float deltaX = destinationPos->x - posControl.actualState.pos.x;
-    const float deltaY = destinationPos->y - posControl.actualState.pos.y;
+    const float deltaX = destinationPos->x - navGetCurrentActualPositionAndVelocity()->pos.x;
+    const float deltaY = destinationPos->y - navGetCurrentActualPositionAndVelocity()->pos.y;
 
     return wrap_36000(RADIANS_TO_CENTIDEGREES(atan2_approx(deltaY, deltaX)));
 }
@@ -1626,16 +1576,16 @@ static void updateDesiredRTHAltitude(void)
         if (!(navGetStateFlags(posControl.navState) & NAV_AUTO_RTH)) {
             switch (navConfig()->general.flags.rth_alt_control_mode) {
             case NAV_RTH_NO_ALT:
-                posControl.homeWaypointAbove.pos.z = posControl.actualState.pos.z;
+                posControl.homeWaypointAbove.pos.z = posControl.actualState.abs.pos.z;
                 break;
             case NAV_RTH_EXTRA_ALT: // Maintain current altitude + predefined safety margin
-                posControl.homeWaypointAbove.pos.z = posControl.actualState.pos.z + navConfig()->general.rth_altitude;
+                posControl.homeWaypointAbove.pos.z = posControl.actualState.abs.pos.z + navConfig()->general.rth_altitude;
                 break;
             case NAV_RTH_MAX_ALT:
-                posControl.homeWaypointAbove.pos.z = MAX(posControl.homeWaypointAbove.pos.z, posControl.actualState.pos.z);
+                posControl.homeWaypointAbove.pos.z = MAX(posControl.homeWaypointAbove.pos.z, posControl.actualState.abs.pos.z);
                 break;
             case NAV_RTH_AT_LEAST_ALT:  // Climb to at least some predefined altitude above home
-                posControl.homeWaypointAbove.pos.z = MAX(posControl.homePosition.pos.z + navConfig()->general.rth_altitude, posControl.actualState.pos.z);
+                posControl.homeWaypointAbove.pos.z = MAX(posControl.homePosition.pos.z + navConfig()->general.rth_altitude, posControl.actualState.abs.pos.z);
                 break;
             case NAV_RTH_CONST_ALT:     // Climb/descend to predefined altitude above home
             default:
@@ -1645,7 +1595,7 @@ static void updateDesiredRTHAltitude(void)
         }
     }
     else {
-        posControl.homeWaypointAbove.pos.z = posControl.actualState.pos.z;
+        posControl.homeWaypointAbove.pos.z = posControl.actualState.abs.pos.z;
     }
 }
 
@@ -1744,7 +1694,7 @@ void updateHomePosition(void)
                     break;
             }
             if (setHome) {
-                setHomePosition(&posControl.actualState.pos, posControl.actualState.yaw, NAV_POS_UPDATE_XY | NAV_POS_UPDATE_Z | NAV_POS_UPDATE_HEADING);
+                setHomePosition(&posControl.actualState.abs.pos, posControl.actualState.yaw, NAV_POS_UPDATE_XY | NAV_POS_UPDATE_Z | NAV_POS_UPDATE_HEADING );
             }
         }
     }
@@ -1755,7 +1705,7 @@ void updateHomePosition(void)
         if (IS_RC_MODE_ACTIVE(BOXHOMERESET)) {
             if (isHomeResetAllowed && !FLIGHT_MODE(FAILSAFE_MODE) && !FLIGHT_MODE(NAV_RTH_MODE) && !FLIGHT_MODE(NAV_WP_MODE) && (posControl.flags.estPosStatue >= EST_USABLE)) {
                 const navSetWaypointFlags_t homeUpdateFlags = STATE(GPS_FIX_HOME) ? (NAV_POS_UPDATE_XY | NAV_POS_UPDATE_HEADING) : (NAV_POS_UPDATE_XY | NAV_POS_UPDATE_Z | NAV_POS_UPDATE_HEADING);
-                setHomePosition(&posControl.actualState.pos, posControl.actualState.yaw, homeUpdateFlags);
+                setHomePosition(&posControl.actualState.abs.pos, posControl.actualState.yaw, homeUpdateFlags);
                 isHomeResetAllowed = false;
             }
         }
@@ -1819,7 +1769,6 @@ void setDesiredPosition(const fpVector3_t * pos, int32_t yaw, navSetWaypointFlag
     // Z-position
     if ((useMask & NAV_POS_UPDATE_Z) != 0) {
         updateClimbRateToAltitudeController(0, ROC_TO_ALT_RESET);   // Reset RoC/RoD -> altitude controller
-        posControl.desiredState.surface = -1;                       // When we directly set altitude target we must reset surface tracking
         posControl.desiredState.pos.z = pos->z;
     }
 
@@ -1838,9 +1787,9 @@ void setDesiredPosition(const fpVector3_t * pos, int32_t yaw, navSetWaypointFlag
 
 void calculateFarAwayTarget(fpVector3_t * farAwayPos, int32_t yaw, int32_t distance)
 {
-    farAwayPos->x = posControl.actualState.pos.x + distance * cos_approx(CENTIDEGREES_TO_RADIANS(yaw));
-    farAwayPos->y = posControl.actualState.pos.y + distance * sin_approx(CENTIDEGREES_TO_RADIANS(yaw));
-    farAwayPos->z = posControl.actualState.pos.z;
+    farAwayPos->x = navGetCurrentActualPositionAndVelocity()->pos.x + distance * cos_approx(CENTIDEGREES_TO_RADIANS(yaw));
+    farAwayPos->y = navGetCurrentActualPositionAndVelocity()->pos.y + distance * sin_approx(CENTIDEGREES_TO_RADIANS(yaw));
+    farAwayPos->z = navGetCurrentActualPositionAndVelocity()->pos.z;
 }
 
 /*-----------------------------------------------------------
@@ -1878,9 +1827,12 @@ void updateClimbRateToAltitudeController(float desiredClimbRate, climbRateToAlti
     static timeUs_t lastUpdateTimeUs;
     timeUs_t currentTimeUs = micros();
 
+    // Terrain following uses different altitude measurement
+    const float altitudeToUse = navGetCurrentActualPositionAndVelocity()->pos.z;
+
     if (mode == ROC_TO_ALT_RESET) {
         lastUpdateTimeUs = currentTimeUs;
-        posControl.desiredState.pos.z = posControl.actualState.pos.z;
+        posControl.desiredState.pos.z = altitudeToUse;
     }
     else {
         if (STATE(FIXED_WING)) {
@@ -1892,22 +1844,23 @@ void updateClimbRateToAltitudeController(float desiredClimbRate, climbRateToAlti
 
             if (timeDelta <= HZ2S(MIN_POSITION_UPDATE_RATE_HZ)) {
                 posControl.desiredState.pos.z += desiredClimbRate * timeDelta;
-                posControl.desiredState.pos.z = constrainf(posControl.desiredState.pos.z,           // FIXME: calculate sanity limits in a smarter way
-                                                             posControl.actualState.pos.z - 500,
-                                                             posControl.actualState.pos.z + 500);
+                posControl.desiredState.pos.z = constrainf(posControl.desiredState.pos.z, altitudeToUse - 500, altitudeToUse + 500);    // FIXME: calculate sanity limits in a smarter way
             }
         }
         else {
             // Multicopter climb-rate control is closed-loop, it's possible to directly calculate desired altitude setpoint to yield the required RoC/RoD
-            posControl.desiredState.pos.z = posControl.actualState.pos.z + (desiredClimbRate / posControl.pids.pos[Z].param.kP);
+            posControl.desiredState.pos.z = altitudeToUse + (desiredClimbRate / posControl.pids.pos[Z].param.kP);
         }
 
         lastUpdateTimeUs = currentTimeUs;
     }
 }
 
-static void resetAltitudeController(void)
+static void resetAltitudeController(bool useTerrainFollowing)
 {
+    // Set terrain following flag
+    posControl.flags.isTerrainFollowEnabled = useTerrainFollowing;
+
     if (STATE(FIXED_WING)) {
         resetFixedWingAltitudeController();
     }
@@ -2019,7 +1972,7 @@ void getWaypoint(uint8_t wpNumber, navWaypoint_t * wpData)
     else if (wpNumber == 255) {
         gpsLocation_t wpLLH;
 
-        geoConvertLocalToGeodetic(&posControl.gpsOrigin, &posControl.actualState.pos, &wpLLH);
+        geoConvertLocalToGeodetic(&posControl.gpsOrigin, &navGetCurrentActualPositionAndVelocity()->pos, &wpLLH);
 
         wpData->lat = wpLLH.lat;
         wpData->lon = wpLLH.lon;
@@ -2053,7 +2006,7 @@ void setWaypoint(uint8_t wpNumber, const navWaypoint_t * wpData)
     // Only valid when armed and in poshold mode
     else if ((wpNumber == 255) && (wpData->action == NAV_WP_ACTION_WAYPOINT) &&
              ARMING_FLAG(ARMED) && (posControl.flags.estPosStatue >= EST_USABLE) && posControl.gpsOrigin.valid && posControl.flags.isGCSAssistedNavigationEnabled &&
-             (posControl.navState == NAV_STATE_POSHOLD_2D_IN_PROGRESS || posControl.navState == NAV_STATE_POSHOLD_3D_IN_PROGRESS)) {
+             (posControl.navState == NAV_STATE_POSHOLD_3D_IN_PROGRESS)) {
         // Convert to local coordinates
         geoConvertGeodeticToLocal(&posControl.gpsOrigin, &wpLLH, &wpPos.pos, GEO_ALT_RELATIVE);
 
@@ -2222,16 +2175,6 @@ float getActiveWaypointSpeed(void)
 }
 
 /*-----------------------------------------------------------
- * A function to reset navigation PIDs and states
- *-----------------------------------------------------------*/
-void resetNavigation(void)
-{
-    resetAltitudeController();
-    resetHeadingController();
-    resetPositionController();
-}
-
-/*-----------------------------------------------------------
  * Process adjustments to alt, pos and yaw controllers
  *-----------------------------------------------------------*/
 static void processNavigationRCAdjustments(void)
@@ -2317,7 +2260,6 @@ void applyWaypointNavigationAndAltitudeHold(void)
     navTargetPosition[X] = constrain(lrintf(posControl.desiredState.pos.x), -32678, 32767);
     navTargetPosition[Y] = constrain(lrintf(posControl.desiredState.pos.y), -32678, 32767);
     navTargetPosition[Z] = constrain(lrintf(posControl.desiredState.pos.z), -32678, 32767);
-    navTargetSurface = constrain(lrintf(posControl.desiredState.surface), -32678, 32767);
 #endif
 }
 
@@ -2409,14 +2351,9 @@ static navigationFSMEvent_t selectNavEventFromBoxModeInput(void)
             canActivateWaypoint = true;
         }
 
-        if (IS_RC_MODE_ACTIVE(BOXNAVPOSHOLD) && IS_RC_MODE_ACTIVE(BOXNAVALTHOLD)) {
-            if ((FLIGHT_MODE(NAV_ALTHOLD_MODE) && FLIGHT_MODE(NAV_POSHOLD_MODE)) || (canActivatePosHold && canActivateAltHold))
-                return NAV_FSM_EVENT_SWITCH_TO_POSHOLD_3D;
-        }
-
         if (IS_RC_MODE_ACTIVE(BOXNAVPOSHOLD)) {
-            if ((FLIGHT_MODE(NAV_POSHOLD_MODE)) || (canActivatePosHold))
-                return NAV_FSM_EVENT_SWITCH_TO_POSHOLD_2D;
+            if (FLIGHT_MODE(NAV_POSHOLD_MODE) || (canActivatePosHold && canActivateAltHold))
+                return NAV_FSM_EVENT_SWITCH_TO_POSHOLD_3D;
         }
 
         if (IS_RC_MODE_ACTIVE(BOXNAVALTHOLD)) {
@@ -2490,6 +2427,11 @@ int8_t navigationGetHeadingControlState(void)
     }
 }
 
+bool navigationTerrainFollowingEnabled(void)
+{
+    return posControl.flags.isTerrainFollowEnabled;
+}
+
 bool navigationBlockArming(void)
 {
     const bool navBoxModesEnabled = IS_RC_MODE_ACTIVE(BOXNAVRTH) || IS_RC_MODE_ACTIVE(BOXNAVWP) || IS_RC_MODE_ACTIVE(BOXNAVPOSHOLD);
@@ -2551,7 +2493,6 @@ void updateFlightBehaviorModifiers(void)
     }
 
     posControl.flags.isGCSAssistedNavigationEnabled = IS_RC_MODE_ACTIVE(BOXGCSNAV);
-    posControl.flags.isTerrainFollowEnabled = IS_RC_MODE_ACTIVE(BOXSURFACE);
 }
 
 /**
@@ -2650,8 +2591,6 @@ void navigationInit(void)
     posControl.waypointListValid = false;
 
     /* Set initial surface invalid */
-    posControl.actualState.surface = -1.0f;
-    posControl.actualState.surfaceVel = 0.0f;
     posControl.actualState.surfaceMin = -1.0f;
 
     /* Reset statistics */
@@ -2666,12 +2605,12 @@ void navigationInit(void)
  *-----------------------------------------------------------*/
 float getEstimatedActualVelocity(int axis)
 {
-    return posControl.actualState.vel.v[axis];
+    return navGetCurrentActualPositionAndVelocity()->vel.v[axis];
 }
 
 float getEstimatedActualPosition(int axis)
 {
-    return posControl.actualState.pos.v[axis];
+    return navGetCurrentActualPositionAndVelocity()->pos.v[axis];
 }
 
 /*-----------------------------------------------------------
